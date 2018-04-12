@@ -1,216 +1,321 @@
-#include <argp.h>
-#include <arpa/inet.h>
-#include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <sys/fcntl.h>
-#include <sys/poll.h>
+#include <argp.h>
+#include <arpa/inet.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sysexits.h>
+#include <stdbool.h>
+#include <string.h>
 #include <time.h>
 #include <unistd.h>
-#include "uthash.h"
+#include "rpc.pb-c.h"
 
-#define ntohll htonll
-#define htonll(x) ((1==htonl(1)) ? (x) : ((uint64_t)htonl((x) & 0xFFFFFFFF) << 32) | htonl((x) >> 32))
+#define MAXLOAD 20
+struct server_arguments{
+	int ports;
+}
 
-static uint8_t msg[19]; /* time request  Ver:1 Seq:2 ClientSeconds:8  Client Nanoseconds: 8*/
+struct client_arguments{
+	uint8_t *msg;
+	size_t msg_len;
+	uint32_t sum;
+	int status; /* 0/1 disconnected / connected */
+}
 
-struct server_arguments  {
-	int port;
-	double dropRate; /* Percentage chance value in [0,100]*/
-};
-
-struct client_arguments {
-	struct sockaddr_in sockAddr;
-	char *addr; /* the client address */
-	int maxSeq; 
-	uint8_t *buffer; /* outgoing info ?*/
-	size_t buflen; /* outgoing length */
-	time_t ttl;
-	UT_hash_handle hh;
-};
-
-
-error_t server_parser(int key, char *arg, struct argp_state *state){
+error_t server_parser(int key, char *arg, struct argp_state *state) {
 	struct server_arguments *args = state->input;
 	error_t ret = 0;
-	int prob;
-	switch(key){
+	switch (key) {
 	case 'p':
 		args->port = atoi(arg);
-		if(args->port == 0){
-			argp_error(state, "Port must be a number > 0");
-		}else if (args->port <= 1024){
-			argp_error(state, "Port must be greater than 1024");
+		if (args->port == 0) { 
+			argp_error(state, "Invalid option for a port, must be a number");
 		}
 		break;
-	case 'd':
-		prob = atoi(arg);
-		if(prob < 0 || prob > 100){
-			argp_error(state, "Probability must be between 0~100");
-		}
-		args->dropRate = (double)prob / 100.0;
-		break;
-	default:	
+	default:
 		ret = ARGP_ERR_UNKNOWN;
 		break;
 	}
 	return ret;
 }
 
-void *server_parseopt(struct server_arguments *args, int argc, char *argv[]){
-	memset(args, 0 , sizeof(*args));
+void *server_parseopt(struct server_arguments *args, int argc, char *argv[]) {
+	memset(args, 0, sizeof(*args));
 
 	struct argp_option options[] = {
-		{ "port", 'p', "port", 0, "The port bind between server and client", 0},
-		{ "drop", 'd', "drop", 0, "The probability of dropping package", 0},
+		{ "port", 'p', "port", 0, "The port to be used for the server" , 0 },
 		{0}
 	};
-
-	struct argp argp_settings = {options, server_parser, 0 ,0 ,0 ,0 ,0 };
-
-	if(argp_parse(&argp_settings, argc, argv, 0, NULL, args) != 0){
-     		fputs("Got an error condition when parsing\n", stderr);
+	
+	struct argp argp_settings = { options, server_parser, 0, 0, 0, 0, 0 };
+	if (argp_parse(&argp_settings, argc, argv, 0, NULL, args) != 0) {
+		fputs("Got an error condition when parsing\n", stderr);
+		exit(EX_USAGE);
+	}
+	if (!args->port) {
+		fputs("A port number must be specified\n", stderr);
 		exit(EX_USAGE);
 	}
 
-	if(!args->port){
-		fputs("A port must be specified\n",stderr);
-		exit(EX_USAGE);
-	}
 	return args;
 }
 
-void handleConnection(struct sockaddr_in *srcAddr, struct client_arguments *current){
-	memset(current, 0, sizeof(*current));/* Zero out structure */
-
-	memcpy(&current->sockAddr, srcAddr, sizeof(current->sockAddr)); /* store client address */
-
-	current->addr = malloc(INET_ADDRSTRLEN + 6); /* store client address */
-	inet_ntop(AF_INET, &current->sockAddr.sin_addr.s_addr, current->addr, INET_ADDRSTRLEN);
-	sprintf(current->addr + strlen(current->addr), ":%d", ntohs(srcAddr->sin_port));
-	current->addr = realloc(current->addr, strlen(current->addr) + 1);
-	current->buffer = malloc(35);
+uint32_t addFunction(uint32_t a, uint32_t b){
+	return a + b;
 }
 
-int handleUDPClient(int sock, struct client_arguments **clients){
+int addWrapper(uint8_t **valueSerial, size_t *valueSerialLen, const uint8_t *argsSerial, size_t argsSerialLne){
+		int error = 0;
+		//Deserialize/Unpack the arguments
+		AddArguments *args = add_arguments__unpack(NULL, argsSerialLen, argsSerial);
+		if(args == NULL) {
+			return 1;
+		}
+		
+		//Call the underlying function
+		uint32_t sum = addFunction(args->a, args->b);
+		*total += sum;
+		
+		//Serialize/Pack the return value
+		AddReturnValue value = ADD_RETURN_VALUE__INIT;
+		value.sum = sum;
+		
+		*valueSerialLen = add_return_value__get_packed_size(&value);
+		*valueSerial = (uint8_t *)malloc(*verialSerialLen);
+		if(*valueSerial == NULL){
+			return 1;
+		}
+		add_return_value__pack(value, *valueSerial);
+		
+		//Cleanup
+		add_arguments__free_unpacked(args, NULL);
+		
+		return error;
+}
 
-	struct client_arguments *current;
-	struct sockaddr_in srcAddr;
-	socklen_t srclen = sizeof(srcAddr);
-	memset(&srcAddr, 0 , srclen);
+int gettotalWrapper(uint8_t **valueSerial, size_t *valueSerial_len, uint32_t *gettotal){
+	int error = 0;
+	//Serialize/Pack 
+	AddReturnValue value = ADD_RETURN_VALUE__INIT;
+	value.sum = *gettotal;
+	
+	*valueSerialLen = add_return_value__get_packed_size(&gettotal);
+	*valueSerial = (uint8_t *)malloc(*valueSerialLen);
+	if(*valueSerial == NULL){
+		return 1;
+	}
+	add_return_value__pack(value, *valueSerial);
+	
+	return error;
+}
+	
+}
 
-	struct timespec t1;
-	clock_gettime(CLOCK_REALTIME, &t1);
+int handleCall(uint8_t **retSerial, const uint8_t *callSerial, struct client_frame *current){
+		int error = 0;
+		
+		//Deserializing/Unpacking the call
+		size_t callSerialLen = ntohl(*(uint32_t *)callSerial);
+		Call *call = call_unpack(NULL, callSerialLen, callSerial + 4);
+		if(call == NULL){
+			return 1;
+		}
+		
+		// Calling the appropriate wrapper function based on the 'name' field
+		uint8_t *valueSerial;
+		size_t valueSerialLen;
+		bool success;
+		
+		if (strcmp(call->name, "add") == 0) {
+			success = !addWrapper(&valueSerial, &valueSerialLen, call->args.data, call->args.len);
+		} else if(strcmp(call->name, "gettotal") == 0){
+			success = !gettotalWrapper(&valueSerial, &valueSerialLen, call->args.data, call->args.len);
+		} else {
+			error = 1;
+			goto errInvalidName;
+		}
+		
+		//Serializing/Packing the return, using the return value from the invoked function
+		Return ret = RETURN__INIT;
+		ret.success = success;
+		if (success) {
+			ret.value.data = valueSerial;
+			ret.value.len = valueSerialLen;
+		}
 
-	if(recvfrom(sock, msg, 19, 0, (struct sockaddr *)&srcAddr, &srclen) < 0){
-		perror("recvfrom() failed");
+		size_t retSerialLen = return__get_packed_size(&ret);
+		*retSerial = (uint8_t *)malloc(4 + retSerialLen);
+		if (*retSerial == NULL) {
+			error = 1;
+			goto errRetMalloc;
+		}
+		
+		*(uint32_t *)*retSerial = htonl(retSerialLen);
+		
+		return_pack(&ret, *retSerial + 4);
+		
+		//Cleanup
+		errRetMalloc:
+					if (success) {
+						free(valueSerial);
+					}
+		errInvalidName:
+					call__free_unpacked(call, NULL);
+
+		return error;
+	
+}
+
+
+int handleConnection(int servSock, struct client_arguments *current){
+	struct sockaddr_in clntAddr;
+	socklen_t clntAddrLen = sizeof(clntAddr);
+	
+	int clntSock;
+	if((clntSock = accept(servSock, (struct sockaddr *)&clntAddr, &clntAddrLen)) < 0 ){
+		perror("accept() failed");
 		exit(1);
 	}
-
-	HASH_FIND(hh, *clients, &srcAddr, srclen, current);
-
-	if(current == NULL){
-		current = malloc(sizeof(struct client_arguments));
-		handleConnection(&srcAddr, current);
-		HASH_ADD(hh, *clients, sockAddr, srclen, current);
-		puts("handling incoming client\n");
-	}
-
-	uint8_t *buffer = current->buffer;
-	memcpy(buffer, msg, 19);
-	int seq = ntohl(*(uint16_t *)&buffer[1]); /* after version */
-
-	if(current->maxSeq < seq){
-		printf("%s:%u %d %d \n", current->addr,current->sockAddr.sin_port, seq, current->maxSeq);
-		current->maxSeq = seq;
-		current->ttl = 2;
-	}
-
-	*(uint64_t *)&buffer[19] = htonll((uint64_t)t1.tv_sec);
-	*(uint64_t *)&buffer[27] = htonll((uint64_t)t1.tv_nsec);
-
-
-	return 0;
+	fcntl(clntSock, F_SETFL, O_NONBLOCK);
+	
+	memset(current, 0, sizeof(*current));
+	current->msg = malloc(MAXLOAD);
+	
+	return clntSock;
 }
 
-void handleSending(int sock, struct client_arguments **clients){
-	struct client_arguments *current, *temp;
-	HASH_ITER(hh, *clients, current, temp){
-		struct sockaddr_in *sockAddr = &current->sockAddr;
-		uint8_t *buffers = current->buffer;
-		if(sendto(sock, buffers, 35, 0, (struct sockaddr *)sockAddr, sizeof(*sockAddr)) < 0){
-			perror("send() failed");
-			exit(1);
-		}
-		puts("sended response");
-	}
-}
 
 int main(int argc, char *argv[]){
 	
-	struct client_arguments *clients = NULL;
 	struct server_arguments args;
 	server_parseopt(&args, argc, argv);
-
-	srand(time(NULL));
 	
-	struct pollfd pollfds;
+	struct pollfd *pollfds = malloc((MAXLOAD) * sizeof(struct pollfd));
+	struct client_arguments **clients = malloc(MAXLOAD * sizeof(void *));
 	
-	int sockfd;
-	sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-	if(sockfd < 0){
-		perror("socket() failed");
+	int servSock;
+	if((servSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0){
+		perror("socket() failed\n");
 		exit(1);
 	}
-	pollfds.fd = sockfd;
+	fcntl(servSock, F_SETFL, O_NONBLOCK);
 	
-	pollfds.events = POLLIN | POLLPRI;
-	fcntl(pollfds.fd, F_SETFL, O_NONBLOCK);
-
+	pollfds[0].fd = servSock;
+	pollfds[0].events = POLLIN | POLLPRI;
+	
+	for(int i = 0; i < MAXLOAD; i++){
+		pollfds[i+1].fd = -1;
+	}
+	
 	struct sockaddr_in servAddr;
 	memset(&servAddr, 0, sizeof(servAddr));
 	servAddr.sin_family = AF_INET;
 	servAddr.sin_addr.s_addr = htonl(INADDR_ANY);
 	servAddr.sin_port = htons(args.port);
-
-	if(bind(pollfds.fd,(struct sockaddr *)&servAddr, sizeof(servAddr)) < 0){
+	
+	if(bind(servSock, (strcut sockaddr *)&servAddr, sizeof(servAddr)) < 0){
 		perror("bind() failed");
 		exit(1);
 	}
-
-	time_t timeout = -1;
-	while(1){
-	switch(poll(&pollfds, 1, timeout)){
-	case -1:
-		perror("poll() failed");
+	
+	if(listen(servSock, SOMAXCONN) < 0){
+		perror("listen() failed");
 		exit(1);
-	case 0:
-		break;
-	default:
-		if(pollfds.revents & POLLIN) {
-			if(rand() >= args.dropRate * ((double)RAND_MAX + 1.0)){
-				if(handleUDPClient(pollfds.fd, &clients) <1){
-					pollfds.events |= POLLOUT & ~POLLIN;
-				}
-
-			}else{
-				puts("dropping packet");
-				recvfrom(pollfds.fd, msg, 19, 0, NULL, 0);
-
-			}
-		}
-
-		if(pollfds.revents & POLLOUT){
-			handleSending(pollfds.fd, &clients);
-			pollfds.events |= POLLIN &~POLLOUT;
-
-		}
-
-		break;
 	}
-   }
+	
+	int has_connection;
+	ssize_t numOfBytes;
+	while(1){
+		switch(poll(pollfds, MAXLOAD, -1)){
+			case -1:
+					perror("poll() failed");
+					exit(1);
+			case 0:
+					break;
+			default:
+					has_connection = pollfds[0].revents & POLLIN;
+					for(int i = 0; i < MAXLOAD; i++){
+						if(pollfds[i + 1].fd < 0){
+							if(has_connection){
+								clients[i] = malloc(sizeof(struct client_arguments));
+								pollfds[i + 1].fd = handleConnection(servSock, clients[i]);
+								pollfds[i + 1].events = POLLIN;
+								has_connection = 0;
+							} else {
+								continue;
+							}
+						}
+						
+						if(pollfds[i + 1].revents & POLLIN){
+							size_t bufLen = ntohl(*(uint32_t *)clients[i]->msg);
+							size_t expBytes;
+							if(clients[i]->msg_len < 4){
+								expBytes = 4 - clients[i]->msg_len;
+							} else {
+								expBytes = 4 + bufLen - clients[i]->msg_len;
+							}
+							
+							if(clients[i]->msg_len + expBytes > MAXLOAD){
+								clients[i]->status = 1;
+							} else if (expBytes){
+								numOfBytes = recv(pollfds[i + 1].fd, clients[i]->msg + clients[i]->msg_len,expBytes, 0);
+								if(numOfBytes <= 0) {
+									if(numOfBytes){
+										perror("recv() failed");
+									} 
+									clients[i]->status = 1;
+								else {
+									clients[i]->msg_len += numOfBytes;
+									bufLen = ntohl(*(uint32_t *)clients[i]->msg);
+								}
+							}
+							if(clients[i]->msg_len >= 4 && clients[i]->msg_len == bufLen + 4){
+								uint8_t *retSerial;
+								pollfds[i + 1].events &= ~POLLIN;
+								if(handleCall(&retSerial, clients[i]->msg, clients[i])){
+									clients[i]->status = 1;
+								} else {
+									clients[i]->msg_len = 4 + ntohl(*(uint32_t *)retSerial);
+									memcpy(clients[i]->msg, retSerial, clients[i]->msg_len);
+									free(retSerial);
+									pollfds[i + 1].events |= POLLOUT;
+								}
+							}
+						}
+						
+						if(pollfds[i+1].revents & POLLOUT) {
+							numOfBytes = send(ufds[i + 1].fd, clients[i]->msg, clients[i]->msg_len, 0);
+							if(numOfBytes <= 0){
+								if(numOfBytes <= 0){
+									perror("recv() failed");
+								}
+								clients[i]->status = 1;
+							} else {
+								clients[i]->msg_len -= numOfBytes;
+								memmove(clients[i]->msg, clients[i]->msg + numOfBytes, clients[i]->msg_len);
+							}
+							if(!clients[i]->msg_len){
+								pollfds[i + 1].events &= ~POLLOUT;
+								pollfds[i + 1].events |= POLLIN;
+							}
+						}
+						
+						if(clients[i]->status){
+							close(pollfds[i + 1].fd);
+							pollfds[i + 1].fd = -1;
+							free(clients[i]->msg);
+							free(clients[i]);
+						}
+					}
+					
+					break;
+				}
+							
+		}					
+									
+		
+	}
 }
+	
+	
