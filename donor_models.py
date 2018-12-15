@@ -13,11 +13,11 @@ class Donor_Collection():
 
     def copy_constructor(self, sampleDB, longest_name, largest_amount):
         """
-        A copy constructor take in sample database for testing
+        A copy constructor take in sample database for testin
 
-        :param: a dictionary collection of initialized donation, longest name in sample database, largest donation amount in the sample database
-
-        :return: 
+        :param: a dictionary collection of initialized donation, longest name in sample database, 
+        largest donation amount in the sample database
+         :return: 
         """
         self.donor_dict = sampleDB
         self.longest_name = longest_name
@@ -25,10 +25,10 @@ class Donor_Collection():
 
     def add_donor(self, donor_name, donation_amount):
         """
-        Add a donor to the donor collection, and compare the length of the donor's name and donation amount to decide the widths we are going to use in generating reports
+        Add a donor to the donor collection, and compare the length of the donor's name and donation 
+        amount to decide the widths we are going to use in generating reports
 
         :param: name of the donor and donation amount
-
         :return: the new donor database
         """
         if donor_name in self.donor_dict:
@@ -47,7 +47,6 @@ class Donor_Collection():
         sort dictionary by the total donation amount donated by each donor
 
         :param: 
-
         :return: a list of tuple of sorted donor
         """
         self.sorted_dict = sorted(
@@ -60,7 +59,6 @@ class Donor_Collection():
         find the donor in the dictionary and get the formatted thank you letter
 
         :param: name of the donor and donation amount
-
         :return: a string type formatted thank you letter
         """
         return self.donor_dict[donor].letter_generator(last_donation_amount)
@@ -71,13 +69,13 @@ class Donor_Collection():
 
         :return: a string type report
         """
-        report = ""
+        report = []
         width = len(self.longest_name) + 8
         width2 = len(str(self.largest_amount)) + 8
 
         self.sort_report()
 
-        report += "{:{width}}{}{:^{width2}}{}{:^10}{}{:^{width2}}{}\n".format(
+        report.append("{:{width}}{}{:^{width2}}{}{:^10}{}{:^{width2}}{}\n".format(
             "      Donor Name",
             "|",
             " Total Given",
@@ -87,27 +85,26 @@ class Donor_Collection():
             "Average Gift",
             "|",
             width=width,
-            width2=width2)
-        report += "-" * (width + width2 * 2 + 16) + "\n"
-        for x in self.sorted_dict:
-            report += "{:{width}}{:1}{:{width2}.2f}{:>11}{:>2}{:>{width2}.2f}\n".format(
-                x[0],
-                "$",
-                x[1].sum_donations,
-                x[1].num_donations,
-                " $",
-                round(x[1].average_donation, 2),
-                width=width,
-                width2=width2)
+            width2=width2))
+        report.append("-" * (width + width2 * 2 + 16) + "\n")
+        
+        [report.append("{:{width}}{:1}{:{width2}.2f}{:>11}{:>2}{:>{width2}.2f}\n".format(
+            x[0],
+            "$",
+            x[1].sum_donations,
+            x[1].num_donations,
+            " $",
+            round(x[1].average_donation, 2),
+            width=width,
+            width2=width2)) for x in self.sorted_dict]
 
-        return report
+        return "".join(report)
 
     def save_all(self, out_path):
         """
         evoke save file function in donor class for each donor
 
         :param: string of output path
-
         :return: 
         """
         [donor.save_to_disk(out_path) for donor in self.donor_dict.values()]
@@ -131,7 +128,6 @@ class Donor():
     def save_to_disk(self, out_path):
         """
         save the thank you letters to the disk
-
         :param: the letters out path
         :return: return a txt file in the working directory
         """
@@ -144,7 +140,6 @@ class Donor():
     def letter_generator(self, donation_amount):
         """
         Generate a thank you letter for donors
-
         :param: donation amount
         :return: a string type letter which stores as a txt file in the working directory
         """
